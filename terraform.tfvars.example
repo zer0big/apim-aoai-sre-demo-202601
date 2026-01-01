@@ -1,0 +1,10 @@
+# Azure 구독 ID (필수)
+subscription_id = "YOUR_SUBSCRIPTION_ID_HERE"
+
+# 선택적: 아래 값들은 기본값이 사용됩니다
+# 필요시 주석을 제거하고 수정하세요
+
+# location = "eastus"
+# apim_publisher_name = "Your Company"
+# apim_publisher_email = "admin@example.com"
+# apim_sku_name = "Developer_1"
