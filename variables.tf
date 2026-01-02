@@ -61,7 +61,7 @@ variable "openai_services" {
       deployment_name = "gpt-4o"
       model_name      = "gpt-4o"
       model_version   = "2024-11-20"
-      capacity        = 20
+      capacity        = 10
 },
     service02 = {
       location        = "westus"
@@ -69,7 +69,7 @@ variable "openai_services" {
       deployment_name = "gpt-4o"
       model_name      = "gpt-4o"
       model_version   = "2024-11-20"
-      capacity        = 20
+      capacity        = 10
     }
   }
 }
