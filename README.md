@@ -36,15 +36,17 @@ Client Request
 
 ### 1️⃣ 배포
 
-```bash
+#### PowerShell로 배포
+
+```powershell
 # 1. 리포지토리 클론
 git clone https://github.com/zer0big/apim-aoai-sre-demo-202601.git
 cd apim-aoai-sre-demo-202601
 
 # 2. terraform.tfvars 파일 생성
-cat > terraform.tfvars <<EOF
-subscription_id = "YOUR_SUBSCRIPTION_ID"
-EOF
+@'
+subscription_id = "YOUR_SUBSCRIPTION_ID_HERE"
+'@ | Set-Content -Path .\terraform.tfvars
 
 # 3. Terraform 초기화 및 배포
 terraform init
@@ -54,17 +56,46 @@ terraform apply -auto-approve
 
 ### 2️⃣ 테스트
 
-배포 완료 후 APIM 엔드포인트로 테스트:
+배포 완료 후 자동 테스트 스크립트 실행:
 
 ```powershell
-# PowerShell 테스트
-$body = '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":50}'
-$uri = "https://zbho-xxx-apim.azure-api.net/openai/chat/completions?api-version=2024-12-01-preview"
+# 백엔드 로드 밸런싱 테스트 (5회)
+.\Test-APIM-Backend.ps1 -Iterations 5
+```
 
-Invoke-WebRequest -Uri $uri `
+**예상 결과:**
+```
+🧪 Azure APIM → Azure OpenAI 백엔드 테스트
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[1/5] Status: ✅ 200 | Backend: zbho-xxx-02-aoai (West US) | Answer: 1+1은 2입니다! 😊
+[2/5] Status: ✅ 200 | Backend: zbho-xxx-01-aoai (East US) | Answer: 1+1은 2입니다! 😊
+[3/5] Status: ✅ 200 | Backend: zbho-xxx-01-aoai (East US) | Answer: 1+1은 2입니다! 😊
+[4/5] Status: ✅ 200 | Backend: zbho-xxx-01-aoai (East US) | Answer: 1+1은 2입니다! :)
+[5/5] Status: ✅ 200 | Backend: zbho-xxx-01-aoai (East US) | Answer: 1+1은 2입니다! 😊
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 테스트 완료!
+```
+
+**또는 수동 테스트:**
+
+```powershell
+$uri = "https://zbho-xxx-apim.azure-api.net/openai/chat/completions?api-version=2024-12-01-preview"
+$body = '{"messages":[{"role":"user","content":"1+1은?"}],"max_tokens":50}'
+
+$r = Invoke-WebRequest -Uri $uri `
     -Method POST `
     -Headers @{"Content-Type"="application/json"} `
-    -Body $body
+    -Body $body `
+    -SkipHttpErrorCheck
+
+Write-Host "Status: $($r.StatusCode)"
+Write-Host "Backend: $($r.Headers['x-ms-deployment-name'])"
+Write-Host "Region: $($r.Headers['x-ms-region'])"
+
+$resp = $r.Content | ConvertFrom-Json
+Write-Host "Answer: $($resp.choices[0].message.content)"
 ```
 
 ## 📦 주요 리소스
