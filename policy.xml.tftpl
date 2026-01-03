@@ -1,0 +1,51 @@
+<policies>
+    <inbound>
+        <base />
+        <!-- Managed Identity를 사용한 Azure OpenAI 인증 -->
+        <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+        
+        <!-- 랜덤 로드 밸런싱: 50% 확률로 backend 선택 -->
+        <set-variable name="backendId" value="@(new Random().Next(100) &lt; 50 ? "aoai-backend-01" : "aoai-backend-02")" />
+        <set-variable name="deploymentName" value="${deployment_name_01}" />
+        <set-backend-service backend-id="@((string)context.Variables["backendId"])" />
+        
+        <!-- URI 경로 재작성: /openai/chat/completions → /openai/deployments/{deployment-name}/chat/completions -->
+        <rewrite-uri template="@{
+            var deployment = (string)context.Variables["deploymentName"];
+            return "/openai/deployments/" + deployment + "/chat/completions?api-version=2024-12-01-preview";
+        }" />
+    </inbound>
+    
+    <backend>
+        <!-- 재시도 로직: Rate limit(429) 또는 서버 에러(5xx) 시 최대 10회 재시도, 지수 백오프 -->
+        <retry condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))" count="10" interval="1" delta="2" max-interval="30">
+            <choose>
+                <!-- 첫 번째 백엔드 실패 시 두 번째 백엔드로 전환 -->
+                <when condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500) &amp;&amp; (string)context.Variables["backendId"] == "aoai-backend-01")">
+                    <set-variable name="backendId" value="aoai-backend-02" />
+                    <set-backend-service backend-id="aoai-backend-02" />
+                </when>
+                <when condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500) &amp;&amp; (string)context.Variables["backendId"] == "aoai-backend-02")">
+                    <set-variable name="backendId" value="aoai-backend-01" />
+                    <set-backend-service backend-id="aoai-backend-01" />
+                </when>
+            </choose>
+            <forward-request buffer-request-body="true" timeout="60" />
+        </retry>
+    </backend>
+    
+    <outbound>
+        <base />
+        <!-- 응답 헤더에 사용된 백엔드 정보 추가 -->
+        <set-header name="X-Backend-Used" exists-action="override">
+            <value>@((string)context.Variables["backendId"])</value>
+        </set-header>
+        <set-header name="X-Deployment-Name" exists-action="override">
+            <value>@((string)context.Variables["deploymentName"])</value>
+        </set-header>
+    </outbound>
+    
+    <on-error>
+        <base />
+    </on-error>
+</policies>

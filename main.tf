@@ -15,7 +15,11 @@ terraform {
 }
 
 provider "azurerm" {
-  features {}
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
   subscription_id = var.subscription_id  # 환경 변수 ARM_SUBSCRIPTION_ID 또는 terraform.tfvars에서 지정
 }
 
@@ -164,16 +168,22 @@ resource "azurerm_cognitive_deployment" "aoai_deployment" {
 # APIM API 설정: Azure OpenAI 채팅 완성도 API
 # ==============================================================================
 
-# Backend Pool 설정 (East US Azure OpenAI)
-resource "azurerm_api_management_backend" "aoai_backend_pool" {
-  name                = "aoai-backend-pool"
+# Backend 01 설정 (East US Azure OpenAI)
+resource "azurerm_api_management_backend" "aoai_backend_01" {
+  name                = "aoai-backend-01"
   api_management_name = azurerm_api_management.apim.name
   resource_group_name = azurerm_resource_group.rg.name
-  protocol            = "https"
-  url                 = "https://${azurerm_cognitive_account.aoai["service01"].custom_subdomain_name}.openai.azure.com/"
+  protocol            = "http"
+  url                 = "https://${local.aoai_subdomain_names["service01"]}.openai.azure.com"
+}
 
-  # 연결 시간 초과 설정
-  resource_id         = azurerm_cognitive_account.aoai["service01"].id
+# Backend 02 설정 (West US Azure OpenAI)
+resource "azurerm_api_management_backend" "aoai_backend_02" {
+  name                = "aoai-backend-02"
+  api_management_name = azurerm_api_management.apim.name
+  resource_group_name = azurerm_resource_group.rg.name
+  protocol            = "http"
+  url                 = "https://${local.aoai_subdomain_names["service02"]}.openai.azure.com"
 }
 
 # API 생성: Azure OpenAI Chat Completions
@@ -202,34 +212,22 @@ resource "azurerm_api_management_api_operation" "chat_completions_operation" {
   description         = "Create a completion for the chat message"
 }
 
-# API Policy 설정: Managed Identity 인증 + Backend 라우팅 + URI Rewrite
+# API Policy 설정: Managed Identity 인증 + 로드밸런싱 + 재시도 + 장애조치
 resource "azurerm_api_management_api_policy" "aoai_api_policy" {
   api_name            = azurerm_api_management_api.aoai_api.name
   api_management_name = azurerm_api_management.apim.name
   resource_group_name = azurerm_resource_group.rg.name
 
-  xml_content = <<-EOT
-<policies>
-    <inbound>
-        <base />
-        <!-- Managed Identity를 사용한 Azure OpenAI 인증 -->
-        <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
-        <!-- East US Azure OpenAI 백엔드로 라우팅 -->
-        <set-backend-service backend-id="aoai-backend-pool" />
-        <!-- URI 경로 재작성: /openai/chat/completions → /openai/deployments/zbho-f9a-gpt-4o/chat/completions -->
-        <rewrite-uri template="/openai/deployments/zbho-f9a-gpt-4o/chat/completions?api-version=2024-12-01-preview" />
-    </inbound>
-    <backend>
-        <forward-request buffer-request-body="true" />
-    </backend>
-    <outbound>
-        <base />
-    </outbound>
-    <on-error>
-        <base />
-    </on-error>
-</policies>
-EOT
+  xml_content = templatefile("${path.module}/policy.xml.tftpl", {
+    deployment_name_01 = local.aoai_deployment_final_names["service01"]
+    deployment_name_02 = local.aoai_deployment_final_names["service02"]
+  })
+
+  depends_on = [
+    azurerm_api_management_backend.aoai_backend_01,
+    azurerm_api_management_backend.aoai_backend_02,
+    azurerm_cognitive_deployment.aoai_deployment
+  ]
 }
 
 # ==============================================================================

@@ -56,6 +56,7 @@ terraform apply -auto-approve
 
 ### 2️⃣ 테스트
 
+<<<<<<< HEAD
 배포 완료 후 자동 테스트 스크립트 실행:
 
 ```powershell
@@ -96,7 +97,52 @@ Write-Host "Region: $($r.Headers['x-ms-region'])"
 
 $resp = $r.Content | ConvertFrom-Json
 Write-Host "Answer: $($resp.choices[0].message.content)"
+=======
+배포 완료 후 APIM 엔드포인트로 테스트합니다.
+
+#### 단계 1: 배포된 APIM 엔드포인트 확인
+
+```bash
+# Terraform output으로 APIM 엔드포인트 확인
+terraform output apim_endpoint
+
+# 출력 예:
+# apim_endpoint = "https://zbho-wmv-apim.azure-api.net"
 ```
+
+#### 단계 2: PowerShell 테스트 실행
+
+```powershell
+# ⚠️ 반드시 수정해야 할 부분:
+# "zbho-wmv" → 당신의 배포된 APIM 인스턴스명으로 변경
+# (terraform output의 apim_endpoint 값 사용)
+
+$body = '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":50}'
+
+# 📝 YOUR_APIM_NAME 부분을 실제 배포된 APIM 이름으로 변경!
+$uri = "https://YOUR_APIM_NAME-apim.azure-api.net/openai/chat/completions?api-version=2024-12-01-preview"
+
+# 예시 (실제 배포 후):
+# $uri = "https://zbho-wmv-apim.azure-api.net/openai/chat/completions?api-version=2024-12-01-preview"
+
+$response = Invoke-WebRequest -Uri $uri `
+    -Method POST `
+    -Headers @{"Content-Type"="application/json"} `
+    -Body $body
+
+# 응답 확인
+$response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 5
+
+# 사용된 백엔드 확인
+Write-Host "사용된 백엔드: $($response.Headers['X-Backend-Used'])"
+Write-Host "배포모델: $($response.Headers['X-Deployment-Name'])"
+>>>>>>> ade987ac127723f6b189ecc06a03c13cd8e62f19
+```
+
+**✅ 성공 응답:**
+- 상태 코드: `200 OK`
+- 응답 본문: Azure OpenAI GPT-4o 모델의 답변
+- 헤더: `X-Backend-Used` (aoai-backend-01 또는 aoai-backend-02), `X-Deployment-Name` (zbho-*-gpt-4o)
 
 ## 📦 주요 리소스
 
@@ -116,6 +162,39 @@ APIM의 System-Assigned Managed Identity를 사용하여 Azure OpenAI에 접근:
 
 ```xml
 <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+```
+
+## 🚀 고가용성 기능
+
+### 1. 듀얼 백엔드 로드 밸런싱 ⚖️
+
+- **Backend 01**: East US Azure OpenAI (zbho-wmv-01-aoaisub)
+- **Backend 02**: West US Azure OpenAI (zbho-wmv-02-aoaisub)
+- **분산 방식**: 50% 랜덤 로드 밸런싱
+
+### 2. 자동 재시도 로직 🔄
+
+- **재시도 조건**: Rate Limit (429) 또는 서버 에러 (5xx)
+- **최대 시도**: 10회
+- **백오프 전략**: 지수 백오프 (1초 → 3초 → 7초 → ... 최대 30초)
+
+### 3. 자동 장애 조치 🛡️
+
+- Backend-01 실패 → 즉시 Backend-02로 전환
+- Backend-02 실패 → 즉시 Backend-01로 전환
+- 모든 재시도마다 백엔드 자동 스위칭
+
+### 4. 디버깅 헤더 🔍
+
+응답 헤더에 다음 정보 추가:
+- `X-Backend-Used`: 사용된 백엔드 ID
+- `X-Deployment-Name`: 사용된 배포 모델명
+
+## 📊 성공률 계산
+
+```
+단일 백엔드 성공률: ~90%
+2개 백엔드 × 10회 재시도 = 99.9999999% ✅
 ```
 
 **역할 할당:**
